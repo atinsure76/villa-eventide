@@ -86,55 +86,16 @@
   // ---------- shape masks ----------
   function makeCanvas(w = W, h = H) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
-  // Pose traced from the supplied recording (crescent lunge, palms joined overhead, profile facing right).
-  // Coordinates are in the recording's 1204×1480 frame, then fitted to the reel.
-  function drawFigure(ctx) {
-    const S = 0.95, sx = 614, sy = 420, top = 300;
-    const P = (x, y) => [540 + (x - sx) * S, top + (y - sy) * S];
-    const R = r => r * S;
-    ctx.fillStyle = '#fff';
-    const dot = (x, y, r) => { const [px, py] = P(x, y); ctx.beginPath(); ctx.arc(px, py, R(r), 0, Math.PI * 2); ctx.fill(); };
-    const ell = (x, y, rx, ry, rot = 0) => { const [px, py] = P(x, y); ctx.beginPath(); ctx.ellipse(px, py, R(rx), R(ry), rot, 0, Math.PI * 2); ctx.fill(); };
-    const limb = (x1, y1, x2, y2, r1, r2, belly = 0) => {
-      const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 1.5);
-      for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        dot(lerp(x1, x2, t), lerp(y1, y2, t), lerp(r1, r2, t) + belly * Math.sin(Math.PI * t));
-      }
-    };
-    const poly = pts => {
-      ctx.beginPath();
-      const m = pts.map(([x, y]) => P(x, y));
-      ctx.moveTo((m[0][0] + m[1][0]) / 2, (m[0][1] + m[1][1]) / 2);
-      for (let i = 1; i <= m.length; i++) {
-        const c = m[i % m.length], n = m[(i + 1) % m.length];
-        ctx.quadraticCurveTo(c[0], c[1], (c[0] + n[0]) / 2, (c[1] + n[1]) / 2);
-      }
-      ctx.closePath(); ctx.fill();
-    };
-    // palms joined, reaching up
-    limb(742, 424, 736, 566, 6, 20);
-    // upper arms framing the head, head in profile
-    limb(736, 560, 742, 760, 22, 32, 4);
-    ell(706, 652, 40, 50, -0.15);
-    limb(700, 700, 708, 748, 18, 20);           // neck
-    // chest and back, lifting out of the hips
-    poly([[580, 760], [660, 726], [760, 742], [806, 790], [790, 860], [762, 920], [764, 1010],
-          [772, 1110], [700, 1150], [640, 1110], [628, 1010], [604, 910], [578, 830]]);
-    ell(812, 812, 30, 26, 0.3);                  // forward elbow / hand catching light
-    // pelvis
-    ell(690, 1180, 100, 70, 0.05);
-    // front thigh to the knee
-    limb(660, 1180, 846, 1192, 66, 50, 6);
-    dot(852, 1206, 40);
-    // front shin dropping to the foot
-    limb(756, 1250, 728, 1430, 42, 22, 4);
-    ell(744, 1446, 40, 15, 0.08);
-    // back leg sweeping long behind
-    limb(612, 1220, 498, 1360, 56, 36, 6);
-    limb(498, 1360, 392, 1500, 36, 20, 3);
-    ell(376, 1514, 30, 13, -0.75);
+  // The brand silhouette (eagle-arm lunge, seen from behind), extracted from the supplied flat artwork.
+  // figure_mask keeps the artwork's interior lines; figure_solid closes them for the travelling light.
+  const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+  let FIG_IMG, FIG_SOLID;
+  function placeFigure(ctx, img) {
+    const h = 1040, w = h * img.width / img.height, top = 290;
+    ctx.drawImage(img, 540 - w / 2, top, w, h);
   }
+  const drawFigure = ctx => placeFigure(ctx, FIG_IMG);
+  const drawFigureSolid = ctx => placeFigure(ctx, FIG_SOLID);
 
   async function drawLetters(ctx) {
     await document.fonts.load('330px "Tiro Devanagari Sanskrit"', 'तपस्');
@@ -196,9 +157,10 @@
   }
 
   // ---------- build a "form": mask, soft glow body, contour path, particle targets ----------
-  async function buildForm(drawFn, count) {
+  async function buildForm(drawFn, count, solidFn = drawFn) {
     const mask = makeCanvas(); const mctx = mask.getContext('2d');
     await drawFn(mctx);
+    const solid = makeCanvas(); await solidFn(solid.getContext('2d'));
     const md = mctx.getImageData(0, 0, W, H).data;
 
     // blurred copy → edge / normal information for dimensional shading
@@ -209,7 +171,7 @@
 
     // glow body: the silhouette itself, softened — never a disc
     const body = makeCanvas(W / 2, H / 2); const bctx = body.getContext('2d');
-    bctx.filter = 'blur(11px)'; bctx.drawImage(mask, 0, 0, W / 2, H / 2); bctx.filter = 'none';
+    bctx.filter = 'blur(11px)'; bctx.drawImage(solid, 0, 0, W / 2, H / 2); bctx.filter = 'none';
 
     // bounding box for sampling
     let x0 = W, y0 = H, x1 = 0, y1 = 0;
@@ -230,7 +192,7 @@
       pts.push({ x, y, edge, rim });
     }
 
-    const contours = traceContours(mask, 3);
+    const contours = traceContours(solid, 3);
     contours.sort((a, b) => Math.min(...a.map(p => p[0])) - Math.min(...b.map(p => p[0])));
     const path = []; contours.forEach(c => c.forEach(p => path.push(p)));
     const total = path.length;
@@ -623,7 +585,8 @@
     gx.putImageData(gd, 0, 0);
     grain = ctx.createPattern(gc, 'repeat');
 
-    FIG = await buildForm(drawFigure, 15000);
+    [FIG_IMG, FIG_SOLID] = await Promise.all([loadImg('assets/figure_mask.png'), loadImg('assets/figure_solid.png')]);
+    FIG = await buildForm(drawFigure, 15000, drawFigureSolid);
     LET = await buildForm(drawLetters, 15000);
     buildParticles();
     renderFrame(0);

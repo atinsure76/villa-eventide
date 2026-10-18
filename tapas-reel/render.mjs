@@ -10,7 +10,7 @@ const [version, bg = ''] = spec.split(':');
 const root = path.dirname(new URL(import.meta.url).pathname);
 const server = http.createServer((req, res) => {
   const f = path.join(root, decodeURIComponent(req.url.split('?')[0]));
-  const type = { '.html': 'text/html', '.css': 'text/css', '.woff2': 'font/woff2' }[path.extname(f)] || 'application/octet-stream';
+  const type = { '.html': 'text/html', '.css': 'text/css', '.woff2': 'font/woff2', '.png': 'image/png' }[path.extname(f)] || 'application/octet-stream';
   fs.readFile(f, (e, d) => { if (e) { res.writeHead(404); res.end(); } else { res.writeHead(200, { 'content-type': type }); res.end(d); } });
 }).listen(0);
 const port = server.address().port;
