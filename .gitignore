@@ -1,0 +1,6 @@
+# large near-lossless masters (re-render with tapas-reel/render.mjs)
+tapas-reel/out/master_*.mp4
+# review scratch
+tapas-reel/out/*.png
+tapas-reel/out/*.jpg
+tapas-reel/out/log*.txt

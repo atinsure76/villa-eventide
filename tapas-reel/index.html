@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1080">
+<title>The Tapas — Reel</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+  :root {
+    --ivory: #f3e8d4;
+    --ivory-dim: rgba(243, 232, 212, 0.72);
+    --gold: #d7b479;
+    --gold-soft: #c9a56c;
+    --plum: #12060b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--plum); }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 1080px; height: 1920px; }
+  .layer { position: absolute; left: 0; width: 1080px; text-align: center; will-change: opacity, transform, filter; opacity: 0; }
+  .shadow { text-shadow: 0 6px 26px rgba(12, 2, 6, 0.62), 0 2px 6px rgba(12, 2, 6, 0.38); }
+  .serif { font-family: 'Cormorant Garamond', serif; }
+  .sans  { font-family: 'Jost', sans-serif; font-weight: 300; }
+  .deva  { font-family: 'Tiro Devanagari Sanskrit', serif; }
+
+  #t-the   { top: 1068px; font-size: 46px; font-weight: 500; letter-spacing: 0.62em; color: var(--ivory); padding-left: 0.62em; }
+  #t-tapas { top: 1112px; font-size: 212px; font-weight: 400; line-height: 1; letter-spacing: 0.1em; color: var(--ivory); padding-left: 0.1em; }
+  #t-deva  { top: 1336px; font-size: 62px; color: var(--gold); }
+
+  #s-line1 { top: 1118px; font-size: 104px; font-weight: 400; line-height: 1; color: var(--ivory); letter-spacing: -0.012em; }
+  #s-line2 { top: 1222px; font-size: 118px; font-weight: 400; font-style: italic; line-height: 1; color: var(--gold-soft); letter-spacing: -0.012em; }
+  #s-kicker { top: 1050px; font-size: 24px; letter-spacing: 0.48em; color: var(--ivory-dim); padding-left: 0.48em; }
+
+  #f-places { top: 1588px; font-size: 25px; letter-spacing: 0.5em; color: var(--ivory-dim); padding-left: 0.5em; }
+
+  #c-wrap  { top: 1440px; }
+  #c-rule  { width: 220px; height: 1px; margin: 0 auto 30px; background: linear-gradient(90deg, transparent, var(--gold) 30%, var(--gold) 70%, transparent); }
+  #c-dates { font-size: 30px; font-weight: 400; letter-spacing: 0.56em; color: var(--gold); padding-left: 0.56em; }
+  #c-soon  { margin-top: 14px; font-size: 58px; font-style: italic; font-weight: 400; color: var(--ivory); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c" width="1080" height="1920"></canvas>
+
+  <div class="layer serif shadow" id="t-the">THE</div>
+  <div class="layer serif shadow" id="t-tapas">TAPAS</div>
+  <div class="layer deva shadow"  id="t-deva">तपस्</div>
+
+  <div class="layer sans shadow"  id="s-kicker">DEVOTION · THE INNER FIRE</div>
+  <div class="layer serif shadow" id="s-line1">Devotion becomes</div>
+  <div class="layer serif shadow" id="s-line2">transformation.</div>
+
+  <div class="layer sans shadow"  id="f-places">BALI · GREECE · ZANZIBAR</div>
+
+  <div class="layer shadow" id="c-wrap">
+    <div id="c-rule"></div>
+    <div class="sans" id="c-dates">2027 DATES</div>
+    <div class="serif" id="c-soon">Coming soon</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const W = 1080, H = 1920, DUR = 25;
+  const VERSION = (new URLSearchParams(location.search).get('v') || 'A').toUpperCase();
+
+  // ---------- deterministic helpers ----------
+  function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  const rand = mulberry32(20270101);
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const ease = {
+    inOutCubic: t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+    outCubic: t => 1 - Math.pow(1 - t, 3),
+    inOutSine: t => -(Math.cos(Math.PI * t) - 1) / 2,
+    outQuart: t => 1 - Math.pow(1 - t, 4),
+  };
+  const span = (t, a, b) => clamp((t - a) / (b - a));
+  const gauss = () => { let u = 0, v = 0; while (!u) u = rand(); while (!v) v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+
+  // ---------- shape masks ----------
+  function makeCanvas(w = W, h = H) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+  // Tree pose (Vrksasana), palms joined overhead. Designed in a 1080-wide space, then fitted.
+  function drawFigure(ctx) {
+    const S = 0.835, top = 318, oy = 194;
+    const P = (x, y) => [540 + (x - 540) * S, top + (y - oy) * S];
+    const R = r => r * S;
+    ctx.fillStyle = '#fff';
+    const dot = (x, y, r) => { const [px, py] = P(x, y); ctx.beginPath(); ctx.arc(px, py, R(r), 0, Math.PI * 2); ctx.fill(); };
+    const ell = (x, y, rx, ry, rot = 0) => { const [px, py] = P(x, y); ctx.beginPath(); ctx.ellipse(px, py, R(rx), R(ry), rot, 0, Math.PI * 2); ctx.fill(); };
+    // tapered limb with a gentle muscular belly
+    const limb = (x1, y1, x2, y2, r1, r2, belly = 0) => {
+      const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 1.5);
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        dot(lerp(x1, x2, t), lerp(y1, y2, t), lerp(r1, r2, t) + belly * Math.sin(Math.PI * Math.min(1, t * 1.25)));
+      }
+    };
+    // head, bun, neck
+    ell(540, 470, 44, 55);
+    dot(546, 408, 25);
+    limb(540, 512, 540, 572, 19, 21);
+    // torso: shoulders → waist → hips
+    {
+      ctx.beginPath();
+      const p = (x, y) => P(x, y);
+      let [x, y] = p(452, 600); ctx.moveTo(x, y);
+      const q = (cx, cy, ex, ey) => { const [a, b] = p(cx, cy), [c, d] = p(ex, ey); ctx.quadraticCurveTo(a, b, c, d); };
+      q(540, 566, 628, 600);       // shoulder line
+      q(612, 690, 596, 760);       // right ribs → waist
+      q(632, 820, 626, 878);       // right hip
+      q(540, 912, 454, 878);       // pelvis
+      q(448, 820, 484, 760);       // left hip → waist
+      q(468, 690, 452, 600);       // left ribs
+      ctx.closePath(); ctx.fill();
+    }
+    // arms overhead, palms together
+    limb(460, 606, 418, 440, 22, 17, 2);
+    limb(418, 440, 530, 262, 17, 12);
+    limb(620, 606, 662, 440, 22, 17, 2);
+    limb(662, 440, 550, 262, 17, 12);
+    ell(540, 236, 17, 44);
+    // standing leg
+    limb(508, 870, 516, 1122, 40, 27, 4);
+    limb(516, 1122, 524, 1352, 27, 15, 5);
+    ell(546, 1374, 46, 15, 0.04);
+    // bent leg, sole resting on inner thigh
+    limb(590, 868, 772, 1018, 40, 27, 3);
+    limb(772, 1018, 572, 1046, 26, 15, 4);
+    ell(560, 1030, 16, 34, -0.35);
+  }
+
+  async function drawLetters(ctx) {
+    await document.fonts.load('330px "Tiro Devanagari Sanskrit"', 'तपस्');
+    ctx.fillStyle = '#fff';
+    ctx.font = '340px "Tiro Devanagari Sanskrit"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('तपस्', 540, 880);
+  }
+
+  // ---------- contour tracing (Moore neighbour) ----------
+  function traceContours(maskCanvas, step) {
+    const w = Math.floor(W / step), h = Math.floor(H / step);
+    const sc = makeCanvas(w, h), sctx = sc.getContext('2d');
+    sctx.drawImage(maskCanvas, 0, 0, w, h);
+    const d = sctx.getImageData(0, 0, w, h).data;
+    const on = (x, y) => x >= 0 && y >= 0 && x < w && y < h && d[(y * w + x) * 4 + 3] > 110;
+    const visited = new Uint8Array(w * h);
+    const dirs = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+    const contours = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (!on(x, y) || on(x - 1, y) || visited[y * w + x]) continue;
+      // only start from outer boundary pixels whose left neighbour is empty and not already traced
+      const pts = []; let cx = x, cy = y, dir = 6, guard = 0;
+      const sx = x, sy = y;
+      do {
+        pts.push([cx * step, cy * step]); visited[cy * w + cx] = 1;
+        let found = false;
+        for (let k = 0; k < 8; k++) {
+          const nd = (dir + 6 + k) % 8, nx = cx + dirs[nd][0], ny = cy + dirs[nd][1];
+          if (on(nx, ny)) { cx = nx; cy = ny; dir = nd; found = true; break; }
+        }
+        if (!found) break;
+      } while ((cx !== sx || cy !== sy) && ++guard < 20000);
+      if (pts.length > 30) contours.push(pts);
+    }
+    // keep outer contours (largest per component is enough for our shapes), smooth & resample
+    return contours.map(c => resample(smooth(c, 3), 5));
+  }
+  function smooth(pts, k) {
+    const n = pts.length, out = [];
+    for (let i = 0; i < n; i++) { let sx = 0, sy = 0; for (let j = -k; j <= k; j++) { const p = pts[(i + j + n) % n]; sx += p[0]; sy += p[1]; } out.push([sx / (2 * k + 1), sy / (2 * k + 1)]); }
+    return out;
+  }
+  function resample(pts, spacing) {
+    const out = [pts[0]]; let acc = 0;
+    for (let i = 1; i <= pts.length; i++) {
+      const a = pts[i - 1], b = pts[i % pts.length];
+      let seg = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      let ax = a[0], ay = a[1];
+      while (acc + seg >= spacing) {
+        const t = (spacing - acc) / seg;
+        ax = ax + (b[0] - ax) * t; ay = ay + (b[1] - ay) * t;
+        out.push([ax, ay]); seg = Math.hypot(b[0] - ax, b[1] - ay); acc = 0;
+      }
+      acc += seg;
+    }
+    return out;
+  }
+
+  // ---------- build a "form": mask, soft glow body, contour path, particle targets ----------
+  async function buildForm(drawFn, count) {
+    const mask = makeCanvas(); const mctx = mask.getContext('2d');
+    await drawFn(mctx);
+    const md = mctx.getImageData(0, 0, W, H).data;
+
+    // blurred copy → edge / normal information for dimensional shading
+    const soft = makeCanvas(); const sctx = soft.getContext('2d');
+    sctx.filter = 'blur(7px)'; sctx.drawImage(mask, 0, 0); sctx.filter = 'none';
+    const sd = sctx.getImageData(0, 0, W, H).data;
+    const sv = (x, y) => { x = clamp(Math.round(x), 0, W - 1); y = clamp(Math.round(y), 0, H - 1); return sd[(y * W + x) * 4 + 3] / 255; };
+
+    // glow body: the silhouette itself, softened — never a disc
+    const body = makeCanvas(W / 2, H / 2); const bctx = body.getContext('2d');
+    bctx.filter = 'blur(11px)'; bctx.drawImage(mask, 0, 0, W / 2, H / 2); bctx.filter = 'none';
+
+    // bounding box for sampling
+    let x0 = W, y0 = H, x1 = 0, y1 = 0;
+    for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) if (md[(y * W + x) * 4 + 3] > 128) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+
+    const pts = [];
+    let guard = 0;
+    while (pts.length < count && guard++ < count * 400) {
+      const x = x0 + rand() * (x1 - x0), y = y0 + rand() * (y1 - y0);
+      if (md[((y | 0) * W + (x | 0)) * 4 + 3] < 128) continue;
+      const v = sv(x, y);
+      const edge = 1 - Math.abs(2 * v - 1);           // 1 at the rim, 0 deep inside
+      // favour the rim for definition, keep the interior as fine dust
+      if (rand() > 0.42 + 0.58 * edge) continue;
+      const nx = sv(x - 3, y) - sv(x + 3, y), ny = sv(x, y - 3) - sv(x, y + 3);
+      const nl = Math.hypot(nx, ny) || 1;
+      const rim = clamp(((nx / nl) * -0.55 + (ny / nl) * -0.83) * edge); // light from upper-left
+      pts.push({ x, y, edge, rim });
+    }
+
+    const contours = traceContours(mask, 3);
+    contours.sort((a, b) => Math.min(...a.map(p => p[0])) - Math.min(...b.map(p => p[0])));
+    const path = []; contours.forEach(c => c.forEach(p => path.push(p)));
+    const total = path.length;
+
+    // each target knows its position along the contour (for the travelling light)
+    const grid = new Map(), G = 40;
+    path.forEach((p, i) => { const k = ((p[0] / G) | 0) + ',' + ((p[1] / G) | 0); (grid.get(k) || grid.set(k, []).get(k)).push(i); });
+    for (const q of pts) {
+      let best = 1e9, bi = 0; const gx = (q.x / G) | 0, gy = (q.y / G) | 0;
+      for (let r = 0; r < 6 && best === 1e9; r++)
+        for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+          const arr = grid.get((gx + dx) + ',' + (gy + dy)); if (!arr) continue;
+          for (const i of arr) { const d = (path[i][0] - q.x) ** 2 + (path[i][1] - q.y) ** 2; if (d < best) { best = d; bi = i; } }
+        }
+      q.s = bi / total;
+      q.depth = Math.sqrt(best);
+    }
+    return { mask, body, pts, path, total, bbox: [x0, y0, x1, y1] };
+  }
+
+  // ---------- particles ----------
+  const COLORS = [ [206, 142, 64], [234, 192, 112], [253, 234, 184] ]; // amber, gold, pale gold
+  let FIG, LET, P = [], AMB = [];
+  const sprite = {}; // pre-rendered soft points and star glints
+
+  function makeSprites() {
+    COLORS.forEach((c, i) => {
+      const s = makeCanvas(32, 32), x = s.getContext('2d');
+      const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+      g.addColorStop(0, `rgba(255,248,226,1)`);
+      g.addColorStop(0.18, `rgba(${c[0]},${c[1]},${c[2]},0.9)`);
+      g.addColorStop(0.5, `rgba(${c[0]},${c[1]},${c[2]},0.18)`);
+      g.addColorStop(1, `rgba(${c[0]},${c[1]},${c[2]},0)`);
+      x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+      sprite['dot' + i] = s;
+    });
+    const s = makeCanvas(96, 96), x = s.getContext('2d');
+    x.translate(48, 48);
+    const ray = (len, wid, rot) => {
+      x.save(); x.rotate(rot);
+      const g = x.createLinearGradient(-len, 0, len, 0);
+      g.addColorStop(0, 'rgba(255,236,190,0)'); g.addColorStop(0.5, 'rgba(255,246,222,1)'); g.addColorStop(1, 'rgba(255,236,190,0)');
+      x.fillStyle = g; x.beginPath(); x.moveTo(-len, 0); x.quadraticCurveTo(0, -wid, len, 0); x.quadraticCurveTo(0, wid, -len, 0); x.fill();
+      x.restore();
+    };
+    ray(46, 2.4, 0); ray(46, 2.4, Math.PI / 2); ray(20, 1.6, Math.PI / 4); ray(20, 1.6, -Math.PI / 4);
+    const g = x.createRadialGradient(0, 0, 0, 0, 0, 14);
+    g.addColorStop(0, 'rgba(255,250,235,1)'); g.addColorStop(1, 'rgba(255,220,150,0)');
+    x.fillStyle = g; x.beginPath(); x.arc(0, 0, 14, 0, Math.PI * 2); x.fill();
+    sprite.star = s;
+  }
+
+  function buildParticles() {
+    const N = FIG.pts.length;
+    const key = (q, bb) => ((q.y - bb[1]) / (bb[3] - bb[1])) * 0.72 + ((q.x - bb[0]) / (bb[2] - bb[0])) * 0.28;
+    const F = FIG.pts.map(q => ({ q, k: key(q, FIG.bbox) + rand() * 0.06 })).sort((a, b) => a.k - b.k);
+    const L = LET.pts.slice(0, N).map(q => ({ q, k: key(q, LET.bbox) + rand() * 0.06 })).sort((a, b) => a.k - b.k);
+    for (let i = 0; i < N; i++) {
+      const f = F[i].q, l = L[i % L.length].q, r = rand();
+      const kind = r < 0.006 ? 2 : r < 0.09 ? 1 : 0; // glint / pinpoint / dust
+      const cr = rand();
+      const col = kind === 2 ? 2 : (cr < 0.32 ? 0 : cr < 0.78 ? 1 : 2);
+      const rad = Math.abs(gauss()) * 230 + 40 + rand() * 260;
+      P.push({
+        f, l, kind, col,
+        size: kind === 0 ? 0.8 + rand() * 1.1 : kind === 1 ? 1.4 + rand() * 1.8 : 14 + rand() * 12,
+        base: kind === 0 ? 0.42 + rand() * 0.42 : 0.7 + rand() * 0.3,
+        // twinkle: unique period and phase per particle; glints flash rarely
+        tf: kind === 2 ? (2 * Math.PI) / (3.5 + rand() * 6) : 0.6 + rand() * 2.8,
+        tp: rand() * Math.PI * 2,
+        tsharp: kind === 0 ? 1 + rand() * 2 : 2 + rand() * 6,
+        // cloud
+        ca: rand() * Math.PI * 2, cr: rad, cw: (0.22 + rand() * 0.18) * (rand() < 0.5 ? 1 : 1) / (0.6 + rad / 520),
+        cz: 0.9 + rand() * 0.6,
+        delay: 0.55 * clamp(rad / 700 + rand() * 0.35),
+        order: i / N,
+        side: rand() < 0.5 ? -1 : 1,
+        loose: 30 + rand() * 70,
+        ph: rand() * 100,
+      });
+    }
+    for (let i = 0; i < 420; i++) AMB.push({ x: rand() * W, y: rand() * H, s: 0.6 + rand() * 1.6, v: 4 + rand() * 12, a: 0.12 + rand() * 0.4, tf: 0.3 + rand() * 1.4, tp: rand() * 7, col: (rand() * 3) | 0 });
+  }
+
+  // ---------- timeline ----------
+  const TL = {
+    asm: [0.6, 3.2],      // gather from the swirling cloud (2.6 s)
+    m1: [10.4, 13.8],     // figure → तपस्
+    m2: [19.8, 23.0],     // तपस् → figure (the reverse, closing the loop)
+    out: [24.55, 25.0],   // dip for a seamless loop
+  };
+  const CX = 540, CY = 820;
+
+  function cloudPos(p, t) {
+    const a = p.ca + p.cw * t * 1.15;
+    const wob = Math.sin(t * 0.7 + p.ph) * 18;
+    return [CX + Math.cos(a) * (p.cr + wob), CY + Math.sin(a) * (p.cr + wob) * 1.55];
+  }
+
+  // morph between two target points with a loosen–travel–settle arc
+  function morph(p, a, b, t, win) {
+    const span0 = win[1] - win[0], stag = 0.9, dur = span0 - stag;
+    const u = clamp((t - win[0] - p.order * stag) / dur);
+    if (u <= 0) return [a.x, a.y, 0, a.s, 0];
+    if (u >= 1) return [b.x, b.y, 1, b.s, 0];
+    const e = ease.inOutCubic(u);
+    const bump = Math.sin(Math.PI * u);
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+    const perp = p.side * Math.min(len * 0.22, 160) * bump;
+    const nx = -dy / len, ny = dx / len;
+    const fl = p.loose * bump;
+    const x = lerp(a.x, b.x, e) + nx * perp + Math.sin(t * 1.6 + p.ph) * fl;
+    const y = lerp(a.y, b.y, e) + ny * perp + Math.cos(t * 1.3 + p.ph * 1.7) * fl;
+    let s = lerp(a.s, b.s, e);
+    return [x, y, e, s, bump];
+  }
+
+  function particleState(p, t) {
+    // assembly
+    if (t < TL.m1[0]) {
+      const u = clamp((t - TL.asm[0] - p.delay) / (TL.asm[1] - TL.asm[0] - 0.55));
+      if (u < 1) {
+        const [cx, cy] = cloudPos(p, t);
+        const e = ease.outQuart(ease.inOutSine(u) * 0.35 + u * 0.65);
+        const dx = cx - p.f.x, dy = cy - p.f.y, rot = (1 - e) * 1.5;
+        const c = Math.cos(rot), s = Math.sin(rot), k = 1 - e;
+        return { x: p.f.x + (dx * c - dy * s) * k, y: p.f.y + (dx * s + dy * c) * k, form: 0, s: p.f.s, scatter: k, depth: p.f.depth };
+      }
+      const since = t - (TL.asm[0] + p.delay + (TL.asm[1] - TL.asm[0] - 0.55));
+      const settle = 2.2 * Math.exp(-4 * since) * Math.sin(since * 9 + p.ph);
+      return { x: p.f.x + settle * Math.cos(p.ph) + breathe(p, t, 0), y: p.f.y + settle * Math.sin(p.ph) + breathe(p, t, 1), form: 0, s: p.f.s, scatter: 0, depth: p.f.depth };
+    }
+    if (t < TL.m2[0]) {
+      const [x, y, e, s, bump] = morph(p, p.f, p.l, t, TL.m1);
+      return { x: x + breathe(p, t, 0), y: y + breathe(p, t, 1), form: e, s, scatter: bump, depth: lerp(p.f.depth, p.l.depth, e) };
+    }
+    const [x, y, e, s, bump] = morph(p, p.l, p.f, t, TL.m2);
+    return { x: x + breathe(p, t, 0), y: y + breathe(p, t, 1), form: 1 - e, s, scatter: bump, depth: lerp(p.l.depth, p.f.depth, e) };
+  }
+  const breathe = (p, t, axis) => (axis ? Math.cos : Math.sin)(t * (0.5 + (p.ph % 1) * 0.6) + p.ph) * 0.9;
+
+  // ---------- the contour-following glow ----------
+  const GLOW_CYCLE = 48, GLOW_SPAN = 0.2;
+  const glowS = t => (0.62 + t / GLOW_CYCLE) % 1;
+  const winTmp = makeCanvas(W / 2, H / 2), winCtx = winTmp.getContext('2d');
+  const glowTmp = makeCanvas(W / 2, H / 2), glowCtx = glowTmp.getContext('2d');
+
+  function renderGlowFor(form, t, strength) {
+    if (strength <= 0.002) return;
+    const sc = 0.5, s0 = glowS(t), n = form.total;
+    // breathing width so the light narrows and stretches as it travels
+    const span = GLOW_SPAN * (0.9 + 0.18 * Math.sin(t * 0.37));
+    winCtx.setTransform(1, 0, 0, 1, 0, 0);
+    winCtx.clearRect(0, 0, W / 2, H / 2);
+    winCtx.lineCap = 'round'; winCtx.lineJoin = 'round';
+    const steps = Math.floor(n * span);
+    const start = Math.floor((s0 - span / 2) * n);
+    for (let i = 0; i < steps; i += 2) {
+      const idx = ((start + i) % n + n) % n, idx2 = ((start + i + 2) % n + n) % n;
+      const a = form.path[idx], b = form.path[idx2];
+      if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 40) continue; // jump between separate letters
+      const u = i / steps, w = Math.pow(Math.sin(Math.PI * u), 1.6);
+      const wob = 1 + 0.25 * Math.sin(u * 9 + t * 0.8);
+      winCtx.globalAlpha = w;
+      winCtx.lineWidth = 120 * sc * wob;
+      winCtx.strokeStyle = '#fff';
+      winCtx.beginPath(); winCtx.moveTo(a[0] * sc, a[1] * sc); winCtx.lineTo(b[0] * sc, b[1] * sc); winCtx.stroke();
+    }
+    winCtx.globalAlpha = 1;
+    // window ∩ silhouette body, then tinted gold
+    glowCtx.globalCompositeOperation = 'source-over';
+    glowCtx.clearRect(0, 0, W / 2, H / 2);
+    glowCtx.filter = 'blur(22px)'; glowCtx.drawImage(winTmp, 0, 0); glowCtx.filter = 'none';
+    glowCtx.globalCompositeOperation = 'destination-in';
+    glowCtx.drawImage(form.body, 0, 0);
+    glowCtx.globalCompositeOperation = 'source-in';
+    const g = glowCtx.createLinearGradient(0, 0, W / 2, H / 2);
+    g.addColorStop(0, 'rgb(255, 196, 110)'); g.addColorStop(1, 'rgb(232, 150, 64)');
+    glowCtx.fillStyle = g; glowCtx.fillRect(0, 0, W / 2, H / 2);
+    glowCtx.globalCompositeOperation = 'source-over';
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.filter = 'blur(10px)';
+    ctx.globalAlpha = 0.42 * strength; ctx.drawImage(glowTmp, 0, 0, W, H);
+    ctx.filter = 'blur(26px)';
+    ctx.globalAlpha = 0.30 * strength; ctx.drawImage(glowTmp, 0, 0, W, H);
+    ctx.restore();
+  }
+
+  // ---------- frame ----------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let grain;
+
+  function background(t) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#11050a'; ctx.fillRect(0, 0, W, H);
+    let g = ctx.createRadialGradient(560, 860, 40, 540, 900, 1050);
+    g.addColorStop(0, 'rgba(84, 32, 36, 1)');
+    g.addColorStop(0.45, 'rgba(52, 18, 26, 1)');
+    g.addColorStop(1, 'rgba(17, 5, 10, 0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // broad, low warmth — atmosphere, not an orb
+    const drift = Math.sin(t * 0.12) * 40;
+    g = ctx.createRadialGradient(620 + drift, 980, 0, 620 + drift, 980, 760);
+    g.addColorStop(0, 'rgba(120, 62, 24, 0.20)'); g.addColorStop(1, 'rgba(120, 62, 24, 0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // lower plum wash (echoes the site's lower band)
+    g = ctx.createLinearGradient(0, 1500, 0, H);
+    g.addColorStop(0, 'rgba(60, 22, 34, 0)'); g.addColorStop(1, 'rgba(60, 22, 34, 0.55)');
+    ctx.fillStyle = g; ctx.fillRect(0, 1500, W, H - 1500);
+  }
+
+  function ambient(t, a) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (const d of AMB) {
+      const y = ((d.y - d.v * t) % H + H) % H, x = d.x + Math.sin(t * 0.3 + d.tp) * 12;
+      ctx.globalAlpha = a * d.a * (0.5 + 0.5 * Math.sin(t * d.tf + d.tp));
+      ctx.drawImage(sprite['dot' + d.col], x - d.s * 2.5, y - d.s * 2.5, d.s * 5, d.s * 5);
+    }
+  }
+
+  function particles(t, master) {
+    const s0 = glowS(t);
+    ctx.globalCompositeOperation = 'lighter';
+    // three passes keep fillStyle changes to a minimum
+    for (let pass = 0; pass < 3; pass++) {
+      const c = COLORS[pass];
+      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      for (const p of P) {
+        if (p.kind !== 0 || p.col !== pass) continue;
+        const st = particleState(p, t);
+        const glow = glowWeight(st.s, s0) * Math.exp(-st.depth / 60);
+        const tw = 0.62 + 0.38 * Math.pow(0.5 + 0.5 * Math.sin(t * p.tf + p.tp), p.tsharp);
+        const shade = 0.55 + 0.35 * p.f.edge + 0.3 * p.f.rim;
+        ctx.globalAlpha = clamp(master * p.base * tw * shade * (1 + 0.9 * glow) * (1 - 0.25 * st.scatter));
+        const sz = p.size * (1 + 0.35 * st.scatter);
+        ctx.fillRect(st.x - sz / 2, st.y - sz / 2, sz, sz);
+      }
+    }
+    for (const p of P) {
+      if (p.kind === 0) continue;
+      const st = particleState(p, t);
+      const glow = glowWeight(st.s, s0) * Math.exp(-st.depth / 60);
+      if (p.kind === 1) {
+        const tw = 0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(t * p.tf + p.tp), p.tsharp);
+        ctx.globalAlpha = clamp(master * p.base * tw * (1 + 0.7 * glow));
+        const sz = p.size * (0.85 + 0.3 * tw);
+        ctx.drawImage(sprite['dot' + p.col], st.x - sz * 2, st.y - sz * 2, sz * 4, sz * 4);
+      } else {
+        // star glint: brief, irregular flashes
+        const f = Math.pow(Math.max(0, Math.sin(t * p.tf + p.tp)), 14);
+        if (f < 0.01) continue;
+        ctx.globalAlpha = clamp(master * f * 0.95);
+        const sz = p.size * (0.6 + 0.6 * f);
+        ctx.save(); ctx.translate(st.x, st.y); ctx.rotate(0.12 + Math.sin(p.ph) * 0.08);
+        ctx.drawImage(sprite.star, -sz, -sz, sz * 2, sz * 2);
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  function glowWeight(s, s0) {
+    let d = Math.abs(s - s0); d = Math.min(d, 1 - d);
+    const h = GLOW_SPAN / 2;
+    return d > h ? 0 : Math.pow(Math.cos((d / h) * Math.PI / 2), 2);
+  }
+
+  function finish(t, fade) {
+    ctx.globalCompositeOperation = 'source-over';
+    // vignette
+    const g = ctx.createRadialGradient(540, 900, 380, 540, 900, 1250);
+    g.addColorStop(0, 'rgba(8, 2, 5, 0)'); g.addColorStop(1, 'rgba(8, 2, 5, 0.72)');
+    ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // film grain — keeps gradients clean after compression
+    ctx.globalCompositeOperation = 'soft-light';
+    ctx.globalAlpha = 0.15;
+    const ox = ((t * 997) % 256) | 0, oy = ((t * 613) % 256) | 0;
+    ctx.save(); ctx.translate(-ox, -oy);
+    ctx.fillStyle = grain; ctx.fillRect(0, 0, W + 256, H + 256);
+    ctx.restore();
+    ctx.globalCompositeOperation = 'source-over';
+    if (fade < 1) { ctx.globalAlpha = 1 - fade; ctx.fillStyle = '#0d0408'; ctx.fillRect(0, 0, W, H); }
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- typography choreography ----------
+  const el = id => document.getElementById(id);
+  const TXT = {
+    the: el('t-the'), tapas: el('t-tapas'), deva: el('t-deva'),
+    kicker: el('s-kicker'), l1: el('s-line1'), l2: el('s-line2'),
+    places: el('f-places'), card: el('c-wrap'),
+  };
+  // in: blur → sharp, rising 22px, tracking settles; out: soft lift and dissolve
+  function line(node, t, tin, din, tout, dout, opts = {}) {
+    const a = ease.outCubic(span(t, tin, tin + din));
+    const b = tout == null ? 0 : ease.inOutSine(span(t, tout, tout + dout));
+    const op = a * (1 - b);
+    node.style.opacity = op.toFixed(4);
+    const rise = (1 - a) * (opts.rise ?? 22) - b * (opts.lift ?? 14);
+    const sc = 1 + (1 - a) * (opts.scale ?? 0.025);
+    node.style.transform = `translateY(${rise.toFixed(2)}px) scale(${sc.toFixed(4)})`;
+    const bl = (1 - a) * (opts.blur ?? 12) + b * 8;
+    node.style.filter = bl > 0.05 ? `blur(${bl.toFixed(2)}px)` : 'none';
+    if (opts.track) node.style.letterSpacing = (opts.track[1] + (1 - a) * (opts.track[0] - opts.track[1])).toFixed(4) + 'em';
+  }
+
+  function typography(t) {
+    const B = VERSION === 'B';
+    // act I — the name, in front of the figure
+    line(TXT.the,   t, 3.15, 1.4, 9.7, 0.9, { track: [0.9, 0.62] });
+    line(TXT.tapas, t, 3.45, 1.8, 9.85, 0.9, { track: [0.2, 0.1], scale: 0.035 });
+    line(TXT.deva,  t, 4.25, 1.4, 9.95, 0.8);
+    // act II — the story, as the Sanskrit becomes legible
+    line(TXT.kicker, t, 12.9, 1.2, 19.3, 0.8, { track: [0.7, 0.48] });
+    line(TXT.l1,     t, 13.3, 1.5, 19.4, 0.8);
+    line(TXT.l2,     t, 14.1, 1.7, 19.5, 0.8, { scale: 0.03 });
+    // act III — the name returns
+    if (t >= 22.0) {
+      line(TXT.the,   t, 22.2, 1.2, null, 0, { track: [0.9, 0.62] });
+      line(TXT.tapas, t, 22.4, 1.5, null, 0, { track: [0.2, 0.1], scale: 0.035 });
+      line(TXT.deva,  t, 22.9, 1.1, null, 0);
+    }
+    // destinations: quiet footer in act I, part of the sign-off at the end
+    const placesIn = span(t, 5.4, 6.8), placesOut = span(t, 9.6, 10.4), placesEnd = span(t, 23.3, 24.3);
+    const pa = Math.max(ease.outCubic(placesIn) * (1 - ease.inOutSine(placesOut)), ease.outCubic(placesEnd));
+    TXT.places.style.opacity = pa.toFixed(4);
+    TXT.places.style.top = (t > 15 && B ? 1668 : 1588) + 'px';
+    TXT.places.style.filter = pa < 0.999 ? `blur(${((1 - pa) * 6).toFixed(2)}px)` : 'none';
+    // version B: 2027 dates
+    if (B) line(TXT.card, t, 23.0, 1.5, null, 0, { rise: 16, blur: 10 });
+    else TXT.card.style.opacity = 0;
+  }
+
+  function renderFrame(t) {
+    t = clamp(t, 0, DUR);
+    const fadeIn = ease.inOutSine(span(t, 0, 0.8));
+    const fadeOut = 1 - ease.inOutSine(span(t, TL.out[0], TL.out[1]));
+    const master = fadeIn * fadeOut;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = 'none';
+    background(t);
+    ambient(t, 0.9 * master);
+
+    // the light follows whichever form is present; it softens while particles are in flight
+    const m1 = span(t, TL.m1[0] + 0.4, TL.m1[1] - 0.2), m2 = span(t, TL.m2[0] + 0.4, TL.m2[1] - 0.2);
+    const letterMix = t < TL.m2[0] ? ease.inOutSine(m1) : 1 - ease.inOutSine(m2);
+    const inFlight = Math.max(Math.sin(Math.PI * m1), Math.sin(Math.PI * m2));
+    const glowIn = ease.inOutSine(span(t, 2.4, 4.6));
+    const gs = master * glowIn * (1 - 0.75 * inFlight);
+    renderGlowFor(FIG, t, gs * (1 - letterMix));
+    renderGlowFor(LET, t, gs * letterMix);
+
+    particles(t, master);
+    finish(t, master);
+    typography(t);
+    for (const k in TXT) if (master < 1) TXT[k].style.opacity = (parseFloat(TXT[k].style.opacity) * master).toFixed(4);
+  }
+
+  async function init() {
+    await document.fonts.ready;
+    await Promise.all([
+      document.fonts.load('400 212px "Cormorant Garamond"'),
+      document.fonts.load('italic 400 118px "Cormorant Garamond"'),
+      document.fonts.load('500 46px "Cormorant Garamond"'),
+      document.fonts.load('300 22px "Jost"'),
+      document.fonts.load('62px "Tiro Devanagari Sanskrit"', 'तपस्'),
+    ]);
+    makeSprites();
+    const gc = makeCanvas(256, 256), gx = gc.getContext('2d'), gd = gx.createImageData(256, 256);
+    for (let i = 0; i < gd.data.length; i += 4) { const v = 128 + gauss() * 46; gd.data[i] = gd.data[i + 1] = gd.data[i + 2] = v; gd.data[i + 3] = 255; }
+    gx.putImageData(gd, 0, 0);
+    grain = ctx.createPattern(gc, 'repeat');
+
+    FIG = await buildForm(drawFigure, 15000);
+    LET = await buildForm(drawLetters, 15000);
+    buildParticles();
+    renderFrame(0);
+  }
+
+  window.DURATION = DUR;
+  window.renderFrame = renderFrame;
+  window.ready = init();
+
+  // live preview when opened in a browser (no ?render)
+  if (!new URLSearchParams(location.search).has('render')) {
+    window.ready.then(() => {
+      const t0 = performance.now();
+      const loop = () => { renderFrame(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); };
+      requestAnimationFrame(loop);
+    });
+  }
+})();
+</script>
+</body>
+</html>
