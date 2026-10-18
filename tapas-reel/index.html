@@ -31,7 +31,6 @@
   #s-line2 { top: 1222px; font-size: 118px; font-weight: 400; font-style: italic; line-height: 1; color: var(--gold-soft); letter-spacing: -0.012em; }
   #s-kicker { top: 1050px; font-size: 24px; letter-spacing: 0.48em; color: var(--ivory-dim); padding-left: 0.48em; }
 
-  #f-places { top: 1588px; font-size: 25px; letter-spacing: 0.5em; color: var(--ivory-dim); padding-left: 0.5em; }
 
   #c-wrap  { top: 1440px; }
   #c-rule  { width: 220px; height: 1px; margin: 0 auto 30px; background: linear-gradient(90deg, transparent, var(--gold) 30%, var(--gold) 70%, transparent); }
@@ -53,7 +52,6 @@
   <div class="layer serif shadow" id="s-line1">Devotion becomes</div>
   <div class="layer serif shadow" id="s-line2">transformation.</div>
 
-  <div class="layer sans shadow"  id="f-places">BALI · GREECE · ZANZIBAR</div>
 
   <div class="layer shadow" id="c-wrap">
     <div id="c-rule"></div>
@@ -90,9 +88,65 @@
   // figure_mask keeps the artwork's interior lines; figure_solid closes them for the travelling light.
   const loadImg = src => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
   let FIG_IMG, FIG_SOLID;
+  // Artwork coordinates (source image): figure mask crop origin, and the arch centreline.
+  const ART = { cropX: 280, cropY: 146, cropH: 961, archL: 282, archR: 937.5, archTop: 112, archBase: 1098 };
+  const ART_K = 1040 / ART.cropH;                                   // figure height on the reel
+  const ART_DX = 540 - ((ART.archL + ART.archR) / 2 - ART.cropX) * ART_K; // centre the arch, figure keeps its place in it
+  const ART_TOP = 330;
+  const artX = x => ART_DX + (x - ART.cropX) * ART_K, artY = y => ART_TOP + (y - ART.cropY) * ART_K;
   function placeFigure(ctx, img) {
-    const h = 1040, w = h * img.width / img.height, top = 290;
-    ctx.drawImage(img, 540 - w / 2, top, w, h);
+    ctx.drawImage(img, artX(ART.cropX), artY(ART.cropY), img.width * ART_K, img.height * ART_K);
+  }
+
+  // The arch frame: a fine hairline that draws itself from the centre of the base, up both sides, meeting at the crown.
+  const ARCH = (() => {
+    const L = artX(ART.archL), Rr = artX(ART.archR), base = artY(ART.archBase), top = artY(ART.archTop);
+    const cx = (L + Rr) / 2, r = (Rr - L) / 2, spring = top + r;
+    const half = [];                                   // sampled half path: base centre → left corner → up → crown
+    for (let x = cx; x >= L; x -= 2) half.push([x, base]);
+    for (let y = base; y >= spring; y -= 2) half.push([L, y]);
+    for (let a = Math.PI; a <= 1.5 * Math.PI + 1e-6; a += 0.004) half.push([cx + r * Math.cos(a), spring + r * Math.sin(a)]);
+    const mirror = half.map(([x, y]) => [2 * cx - x, y]);
+    const glints = Array.from({ length: 18 }, () => ({ u: rand(), f: (2 * Math.PI) / (3 + rand() * 5), p: rand() * 7, side: rand() < 0.5 }));
+    return { half, mirror, glints, cx, base, top };
+  })();
+  function strokeHalf(pts, n) {
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < n; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+  }
+  function drawArch(t, master) {
+    const draw = t > 15 ? ease.inOutCubic(span(t, 21.6, 23.8)) : ease.inOutCubic(span(t, 2.2, 4.6));
+    const fade = t > 15 ? 1 : 1 - 0.85 * ease.inOutSine(span(t, 10.0, 11.4));   // softens while the Sanskrit has the stage
+    const vis = (t > 15 && t < 21.6) ? 0 : master * fade;
+    if (draw <= 0 || vis <= 0.002) return;
+    const n = Math.max(2, Math.floor(ARCH.half.length * draw));
+    const [lr, lg, lb] = ORANGE ? [255, 238, 196] : [236, 204, 142];
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.globalCompositeOperation = ORANGE ? 'source-over' : 'lighter';
+    // soft bloom, then the crisp hairline
+    ctx.filter = 'blur(5px)'; ctx.lineWidth = 7; ctx.strokeStyle = `rgba(${lr},${lg},${lb},${0.38 * vis})`;
+    strokeHalf(ARCH.half, n); strokeHalf(ARCH.mirror, n);
+    ctx.filter = 'none'; ctx.lineWidth = 3; ctx.strokeStyle = `rgba(${lr},${lg},${lb},${0.95 * vis})`;
+    strokeHalf(ARCH.half, n); strokeHalf(ARCH.mirror, n);
+    // a spark leads each line while it draws
+    if (draw < 1) for (const pts of [ARCH.half, ARCH.mirror]) {
+      const [x, y] = pts[n - 1], sz = 16;
+      ctx.globalAlpha = vis * Math.sin(Math.PI * draw);
+      ctx.drawImage(sprite.star, x - sz, y - sz, sz * 2, sz * 2);
+    }
+    // occasional glints settle along the finished frame
+    for (const g of ARCH.glints) {
+      if (g.u > draw) continue;
+      const f = Math.pow(Math.max(0, Math.sin(t * g.f + g.p)), 16);
+      if (f < 0.02) continue;
+      const pts = g.side ? ARCH.half : ARCH.mirror, [x, y] = pts[Math.floor(g.u * (pts.length - 1))], sz = 9 + 8 * f;
+      ctx.globalAlpha = vis * f * 0.9;
+      ctx.drawImage(sprite.star, x - sz, y - sz, sz * 2, sz * 2);
+    }
+    ctx.restore();
   }
   const drawFigure = ctx => placeFigure(ctx, FIG_IMG);
   const drawFigureSolid = ctx => placeFigure(ctx, FIG_SOLID);
@@ -429,6 +483,7 @@
       ctx.globalAlpha = a * d.a * (0.5 + 0.5 * Math.sin(t * d.tf + d.tp));
       ctx.drawImage(sprite['dot' + d.col], x - d.s * 2.5, y - d.s * 2.5, d.s * 5, d.s * 5);
     }
+    ctx.globalAlpha = 1; // don't leak the last mote's alpha into later layers
   }
 
   function particles(t, master) {
@@ -502,7 +557,7 @@
   const TXT = {
     the: el('t-the'), tapas: el('t-tapas'), deva: el('t-deva'),
     kicker: el('s-kicker'), l1: el('s-line1'), l2: el('s-line2'),
-    places: el('f-places'), card: el('c-wrap'),
+    card: el('c-wrap'),
   };
   // in: blur → sharp, rising 22px, tracking settles; out: soft lift and dissolve
   function line(node, t, tin, din, tout, dout, opts = {}) {
@@ -534,12 +589,6 @@
       line(TXT.tapas, t, 22.4, 1.5, null, 0, { track: [0.2, 0.1], scale: 0.035 });
       line(TXT.deva,  t, 22.9, 1.1, null, 0);
     }
-    // destinations: quiet footer in act I, part of the sign-off at the end
-    const placesIn = span(t, 5.4, 6.8), placesOut = span(t, 9.6, 10.4), placesEnd = span(t, 23.3, 24.3);
-    const pa = Math.max(ease.outCubic(placesIn) * (1 - ease.inOutSine(placesOut)), ease.outCubic(placesEnd));
-    TXT.places.style.opacity = pa.toFixed(4);
-    TXT.places.style.top = (t > 15 && B ? 1668 : 1588) + 'px';
-    TXT.places.style.filter = pa < 0.999 ? `blur(${((1 - pa) * 6).toFixed(2)}px)` : 'none';
     // version B: 2027 dates
     if (B) line(TXT.card, t, 23.0, 1.5, null, 0, { rise: 16, blur: 10 });
     else TXT.card.style.opacity = 0;
@@ -564,6 +613,7 @@
     renderGlowFor(FIG, t, gs * (1 - letterMix));
     renderGlowFor(LET, t, gs * letterMix);
 
+    drawArch(t, master);
     particles(t, master);
     finish(t, master);
     typography(t);
