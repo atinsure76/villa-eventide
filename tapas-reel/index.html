@@ -23,9 +23,9 @@
   .sans  { font-family: 'Jost', sans-serif; font-weight: 300; }
   .deva  { font-family: 'Tiro Devanagari Sanskrit', serif; }
 
-  #t-the   { top: 1068px; font-size: 46px; font-weight: 500; letter-spacing: 0.62em; color: var(--ivory); padding-left: 0.62em; }
-  #t-tapas { top: 1112px; font-size: 212px; font-weight: 400; line-height: 1; letter-spacing: 0.1em; color: var(--ivory); padding-left: 0.1em; }
-  #t-deva  { top: 1336px; font-size: 62px; color: var(--gold); }
+  #t-the   { top: 744px; font-size: 46px; font-weight: 500; letter-spacing: 0.62em; color: var(--ivory); padding-left: 0.62em; }
+  #t-tapas { top: 790px; font-size: 212px; font-weight: 400; line-height: 1; letter-spacing: 0.1em; color: var(--ivory); padding-left: 0.1em; }
+  #t-deva  { top: 1012px; font-size: 62px; color: var(--gold); }
 
   #s-line1 { top: 1118px; font-size: 104px; font-weight: 400; line-height: 1; color: var(--ivory); letter-spacing: -0.012em; }
   #s-line2 { top: 1222px; font-size: 118px; font-weight: 400; font-style: italic; line-height: 1; color: var(--gold-soft); letter-spacing: -0.012em; }
@@ -82,54 +82,54 @@
   // ---------- shape masks ----------
   function makeCanvas(w = W, h = H) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
-  // Tree pose (Vrksasana), palms joined overhead. Designed in a 1080-wide space, then fitted.
+  // Pose traced from the supplied recording (crescent lunge, palms joined overhead, profile facing right).
+  // Coordinates are in the recording's 1204×1480 frame, then fitted to the reel.
   function drawFigure(ctx) {
-    const S = 0.835, top = 318, oy = 194;
-    const P = (x, y) => [540 + (x - 540) * S, top + (y - oy) * S];
+    const S = 0.95, sx = 614, sy = 420, top = 300;
+    const P = (x, y) => [540 + (x - sx) * S, top + (y - sy) * S];
     const R = r => r * S;
     ctx.fillStyle = '#fff';
     const dot = (x, y, r) => { const [px, py] = P(x, y); ctx.beginPath(); ctx.arc(px, py, R(r), 0, Math.PI * 2); ctx.fill(); };
     const ell = (x, y, rx, ry, rot = 0) => { const [px, py] = P(x, y); ctx.beginPath(); ctx.ellipse(px, py, R(rx), R(ry), rot, 0, Math.PI * 2); ctx.fill(); };
-    // tapered limb with a gentle muscular belly
     const limb = (x1, y1, x2, y2, r1, r2, belly = 0) => {
       const n = Math.ceil(Math.hypot(x2 - x1, y2 - y1) / 1.5);
       for (let i = 0; i <= n; i++) {
         const t = i / n;
-        dot(lerp(x1, x2, t), lerp(y1, y2, t), lerp(r1, r2, t) + belly * Math.sin(Math.PI * Math.min(1, t * 1.25)));
+        dot(lerp(x1, x2, t), lerp(y1, y2, t), lerp(r1, r2, t) + belly * Math.sin(Math.PI * t));
       }
     };
-    // head, bun, neck
-    ell(540, 470, 44, 55);
-    dot(546, 408, 25);
-    limb(540, 512, 540, 572, 19, 21);
-    // torso: shoulders → waist → hips
-    {
+    const poly = pts => {
       ctx.beginPath();
-      const p = (x, y) => P(x, y);
-      let [x, y] = p(452, 600); ctx.moveTo(x, y);
-      const q = (cx, cy, ex, ey) => { const [a, b] = p(cx, cy), [c, d] = p(ex, ey); ctx.quadraticCurveTo(a, b, c, d); };
-      q(540, 566, 628, 600);       // shoulder line
-      q(612, 690, 596, 760);       // right ribs → waist
-      q(632, 820, 626, 878);       // right hip
-      q(540, 912, 454, 878);       // pelvis
-      q(448, 820, 484, 760);       // left hip → waist
-      q(468, 690, 452, 600);       // left ribs
+      const m = pts.map(([x, y]) => P(x, y));
+      ctx.moveTo((m[0][0] + m[1][0]) / 2, (m[0][1] + m[1][1]) / 2);
+      for (let i = 1; i <= m.length; i++) {
+        const c = m[i % m.length], n = m[(i + 1) % m.length];
+        ctx.quadraticCurveTo(c[0], c[1], (c[0] + n[0]) / 2, (c[1] + n[1]) / 2);
+      }
       ctx.closePath(); ctx.fill();
-    }
-    // arms overhead, palms together
-    limb(460, 606, 418, 440, 22, 17, 2);
-    limb(418, 440, 530, 262, 17, 12);
-    limb(620, 606, 662, 440, 22, 17, 2);
-    limb(662, 440, 550, 262, 17, 12);
-    ell(540, 236, 17, 44);
-    // standing leg
-    limb(508, 870, 516, 1122, 40, 27, 4);
-    limb(516, 1122, 524, 1352, 27, 15, 5);
-    ell(546, 1374, 46, 15, 0.04);
-    // bent leg, sole resting on inner thigh
-    limb(590, 868, 772, 1018, 40, 27, 3);
-    limb(772, 1018, 572, 1046, 26, 15, 4);
-    ell(560, 1030, 16, 34, -0.35);
+    };
+    // palms joined, reaching up
+    limb(742, 424, 736, 566, 6, 20);
+    // upper arms framing the head, head in profile
+    limb(736, 560, 742, 760, 22, 32, 4);
+    ell(706, 652, 40, 50, -0.15);
+    limb(700, 700, 708, 748, 18, 20);           // neck
+    // chest and back, lifting out of the hips
+    poly([[580, 760], [660, 726], [760, 742], [806, 790], [790, 860], [762, 920], [764, 1010],
+          [772, 1110], [700, 1150], [640, 1110], [628, 1010], [604, 910], [578, 830]]);
+    ell(812, 812, 30, 26, 0.3);                  // forward elbow / hand catching light
+    // pelvis
+    ell(690, 1180, 100, 70, 0.05);
+    // front thigh to the knee
+    limb(660, 1180, 846, 1192, 66, 50, 6);
+    dot(852, 1206, 40);
+    // front shin dropping to the foot
+    limb(756, 1250, 728, 1430, 42, 22, 4);
+    ell(744, 1446, 40, 15, 0.08);
+    // back leg sweeping long behind
+    limb(612, 1220, 498, 1360, 56, 36, 6);
+    limb(498, 1360, 392, 1500, 36, 20, 3);
+    ell(376, 1514, 30, 13, -0.75);
   }
 
   async function drawLetters(ctx) {
