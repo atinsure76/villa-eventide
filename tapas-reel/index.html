@@ -37,6 +37,8 @@
   #c-rule  { width: 220px; height: 1px; margin: 0 auto 30px; background: linear-gradient(90deg, transparent, var(--gold) 30%, var(--gold) 70%, transparent); }
   #c-dates { font-size: 30px; font-weight: 400; letter-spacing: 0.56em; color: var(--gold); padding-left: 0.56em; }
   #c-soon  { margin-top: 14px; font-size: 58px; font-style: italic; font-weight: 400; color: var(--ivory); }
+  .orange { --gold: #fbe3b0; --gold-soft: #fde7b8; --ivory-dim: rgba(253, 243, 228, 0.88); --plum: #bf4934; }
+  .orange .shadow { text-shadow: 0 6px 26px rgba(70, 14, 6, 0.55), 0 2px 6px rgba(70, 14, 6, 0.4); }
 </style>
 </head>
 <body>
@@ -64,6 +66,8 @@
 (() => {
   const W = 1080, H = 1920, DUR = 25;
   const VERSION = (new URLSearchParams(location.search).get('v') || 'A').toUpperCase();
+  const ORANGE = new URLSearchParams(location.search).get('bg') === 'orange';
+  if (ORANGE) document.documentElement.classList.add('orange');
 
   // ---------- deterministic helpers ----------
   function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -248,7 +252,10 @@
   }
 
   // ---------- particles ----------
-  const COLORS = [ [206, 142, 64], [234, 192, 112], [253, 234, 184] ]; // amber, gold, pale gold
+  // burgundy: amber, gold, pale gold (added light). orange: bronze shadow dust, gold, champagne (painted light)
+  const COLORS = ORANGE ? [ [112, 40, 12], [255, 206, 84], [255, 236, 168] ]
+                        : [ [206, 142, 64], [234, 192, 112], [253, 234, 184] ];
+  const BLEND = ORANGE ? 'source-over' : 'lighter';
   let FIG, LET, P = [], AMB = [];
   const sprite = {}; // pre-rendered soft points and star glints
 
@@ -288,7 +295,8 @@
       const f = F[i].q, l = L[i % L.length].q, r = rand();
       const kind = r < 0.006 ? 2 : r < 0.09 ? 1 : 0; // glint / pinpoint / dust
       const cr = rand();
-      const col = kind === 2 ? 2 : (cr < 0.32 ? 0 : cr < 0.78 ? 1 : 2);
+      let col = kind === 2 ? 2 : (cr < 0.32 ? 0 : cr < 0.78 ? 1 : 2);
+      if (ORANGE && kind === 1 && col === 0) col = 1; // pinpoints are always light
       const rad = Math.abs(gauss()) * 230 + 40 + rand() * 260;
       P.push({
         f, l, kind, col,
@@ -404,7 +412,8 @@
     glowCtx.drawImage(form.body, 0, 0);
     glowCtx.globalCompositeOperation = 'source-in';
     const g = glowCtx.createLinearGradient(0, 0, W / 2, H / 2);
-    g.addColorStop(0, 'rgb(255, 196, 110)'); g.addColorStop(1, 'rgb(232, 150, 64)');
+    if (ORANGE) { g.addColorStop(0, 'rgb(170, 128, 30)'); g.addColorStop(1, 'rgb(150, 110, 20)'); }
+    else { g.addColorStop(0, 'rgb(255, 196, 110)'); g.addColorStop(1, 'rgb(232, 150, 64)'); }
     glowCtx.fillStyle = g; glowCtx.fillRect(0, 0, W / 2, H / 2);
     glowCtx.globalCompositeOperation = 'source-over';
 
@@ -424,6 +433,16 @@
 
   function background(t) {
     ctx.globalCompositeOperation = 'source-over';
+    if (ORANGE) {
+      // brand terracotta #BF4934: lifted at the heart, deepening toward the edges
+      ctx.fillStyle = '#a63b29'; ctx.fillRect(0, 0, W, H);
+      let g = ctx.createRadialGradient(560, 860, 40, 540, 900, 1100);
+      g.addColorStop(0, 'rgba(201, 82, 57, 1)');
+      g.addColorStop(0.5, 'rgba(191, 73, 52, 1)');
+      g.addColorStop(1, 'rgba(191, 73, 52, 0)');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      return;
+    }
     ctx.fillStyle = '#11050a'; ctx.fillRect(0, 0, W, H);
     let g = ctx.createRadialGradient(560, 860, 40, 540, 900, 1050);
     g.addColorStop(0, 'rgba(84, 32, 36, 1)');
@@ -442,7 +461,7 @@
   }
 
   function ambient(t, a) {
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = BLEND;
     for (const d of AMB) {
       const y = ((d.y - d.v * t) % H + H) % H, x = d.x + Math.sin(t * 0.3 + d.tp) * 12;
       ctx.globalAlpha = a * d.a * (0.5 + 0.5 * Math.sin(t * d.tf + d.tp));
@@ -451,8 +470,9 @@
   }
 
   function particles(t, master) {
+    if (ORANGE) master *= 1.7;
     const s0 = glowS(t);
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = BLEND;
     // three passes keep fillStyle changes to a minimum
     for (let pass = 0; pass < 3; pass++) {
       const c = COLORS[pass];
@@ -500,7 +520,8 @@
     ctx.globalCompositeOperation = 'source-over';
     // vignette
     const g = ctx.createRadialGradient(540, 900, 380, 540, 900, 1250);
-    g.addColorStop(0, 'rgba(8, 2, 5, 0)'); g.addColorStop(1, 'rgba(8, 2, 5, 0.72)');
+    if (ORANGE) { g.addColorStop(0, 'rgba(90, 22, 12, 0)'); g.addColorStop(1, 'rgba(90, 22, 12, 0.5)'); }
+    else { g.addColorStop(0, 'rgba(8, 2, 5, 0)'); g.addColorStop(1, 'rgba(8, 2, 5, 0.72)'); }
     ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     // film grain — keeps gradients clean after compression
     ctx.globalCompositeOperation = 'soft-light';
@@ -510,7 +531,7 @@
     ctx.fillStyle = grain; ctx.fillRect(0, 0, W + 256, H + 256);
     ctx.restore();
     ctx.globalCompositeOperation = 'source-over';
-    if (fade < 1) { ctx.globalAlpha = 1 - fade; ctx.fillStyle = '#0d0408'; ctx.fillRect(0, 0, W, H); }
+    if (fade < 1) { ctx.globalAlpha = 1 - fade; ctx.fillStyle = ORANGE ? '#a63b29' : '#0d0408'; ctx.fillRect(0, 0, W, H); }
     ctx.globalAlpha = 1;
   }
 

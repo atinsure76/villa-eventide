@@ -1,11 +1,12 @@
-// Usage: node render.mjs <A|B> <out.mp4> [fps]   |   node render.mjs <A|B> --stills t1,t2,...
+// Usage: node render.mjs <A|B>[:orange] <out.mp4> [fps]   |   node render.mjs <A|B> --stills t1,t2,...
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [version = 'A', out = 'out.mp4', arg3] = process.argv.slice(2);
+const [spec = 'A', out = 'out.mp4', arg3] = process.argv.slice(2);
+const [version, bg = ''] = spec.split(':');
 const root = path.dirname(new URL(import.meta.url).pathname);
 const server = http.createServer((req, res) => {
   const f = path.join(root, decodeURIComponent(req.url.split('?')[0]));
@@ -17,13 +18,13 @@ const port = server.address().port;
 const browser = await chromium.launch({ args: ['--disable-gpu-vsync', '--force-color-profile=srgb'] });
 const page = await browser.newPage({ viewport: { width: 1080, height: 1920 }, deviceScaleFactor: 1 });
 page.on('pageerror', e => console.error('pageerror', e));
-await page.goto(`http://localhost:${port}/index.html?render&v=${version}`);
+await page.goto(`http://localhost:${port}/index.html?render&v=${version}&bg=${bg}`);
 await page.evaluate(() => window.ready);
 
 if (out === '--stills') {
   for (const t of arg3.split(',').map(Number)) {
     await page.evaluate(t => window.renderFrame(t), t);
-    await page.screenshot({ path: path.join(root, 'out', `still_${version}_${t.toFixed(1)}.png`) });
+    await page.screenshot({ path: path.join(root, 'out', `still_${version}${bg}_${t.toFixed(1)}.png`) });
     console.log('still', t);
   }
 } else {
